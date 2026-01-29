@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>启动补丁</title>
+    <HTA:APPLICATION ID="oHTA" APPLICATIONNAME="PVZHE Launcher" BORDER="thin" CAPTION="yes" SHOWINTASKBAR="yes"
+        SINGLEINSTANCE="yes" SYSMENU="yes" WINDOWSTATE="normal" SCROLL="no" MAXIMIZEBUTTON="yes"/>
+    <script type="text/javascript">
+        var fso, shell;
+        var currentHTADir;
+        var exeFiles = [];
+        var selectedExeIndex = -1;
+        // 优先级关键词数组（顺序决定优先级）
+        var keywordSort = ["植物大战僵尸杂交版", "pvzHE", "植物大战僵尸", "PlantsVsZombies"];
+
+        function initObjects() {
+            if (!fso || !shell) {
+                fso = new ActiveXObject("Scripting.FileSystemObject");
+                shell = new ActiveXObject("WScript.Shell");
+
+                var htaPath = unescape(location.href.replace("file:///", ""));
+                htaPath = htaPath.replace(/\//g, "\\");
+                currentHTADir = fso.GetParentFolderName(htaPath);
+            }
+        }
+
+        // 新增：按关键词优先级排序EXE文件
+        function sortExeFilesByPriority(files) {
+            // 初始化分组：关键词分组 + 未匹配分组
+            var priorityGroups = [];
+            for (var i = 0; i < keywordSort.length; i++) {
+                priorityGroups.push([]);
+            }
+            var otherGroup = [];
+
+            // 遍历文件进行分组（一旦匹配高优先级关键词，不再参与低优先级匹配）
+            for (var i = 0; i < files.length; i++) {
+                var file = files[i];
+                var matched = false;
+
+                // 按关键词优先级顺序匹配
+                for (var j = 0; j < keywordSort.length; j++) {
+                    var keyword = keywordSort[j];
+                    // IE5兼容的不区分大小写匹配
+                    if (file.name.toLowerCase().indexOf(keyword.toLowerCase()) !== -1) {
+                        priorityGroups[j].push(file);
+                        matched = true;
+                        break; // 匹配到高优先级，跳出循环
+                    }
+                }
+
+                // 未匹配任何关键词，放入其他组
+                if (!matched) {
+                    otherGroup.push(file);
+                }
+            }
+
+            // 合并所有分组：优先级组按顺序排列，最后拼接其他组
+            var sortedFiles = [];
+            for (var i = 0; i < priorityGroups.length; i++) {
+                sortedFiles = sortedFiles.concat(priorityGroups[i]);
+            }
+            sortedFiles = sortedFiles.concat(otherGroup);
+
+            return sortedFiles;
+        }
+
+        function findAllExeFiles() {
+            initObjects();
+            exeFiles = [];
+            var folder = fso.GetFolder(currentHTADir);
+            var files = new Enumerator(folder.Files);
+            var re = /\.exe$/i;
+
+            for (; !files.atEnd(); files.moveNext()) {
+                var file = files.item();
+                if (re.test(file.Name)) {
+                    exeFiles.push({
+                        name: file.Name,
+                        path: file.Path
+                    });
+                }
+            }
+
+            // 新增：调用排序函数
+            exeFiles = sortExeFilesByPriority(exeFiles);
+            return exeFiles;
+        }
+
+        function toggleDropdown() {
+            var list = document.getElementById("customList");
+            list.style.display = (list.style.display == "block") ? "none" : "block";
+        }
+
+        function selectItem(index) {
+            selectedExeIndex = index;
+            var display = document.getElementById("customDisplay");
+            display.innerHTML = exeFiles[index].name;
+            document.getElementById("customList").style.display = "none";
+        }
+
+        function initExeDropdown() {
+            var files = findAllExeFiles();
+            var list = document.getElementById("customList");
+            list.innerHTML = "";
+
+            var display = document.getElementById("customDisplay");
+            if (files.length > 0) {
+                selectedExeIndex = 0;
+                display.innerHTML = files[0].name;
+
+                for (var i = 0; i < files.length; i++) {
+                    var item = document.createElement("div");
+                    item.className = "list-item";
+                    item.innerHTML = files[i].name;
+                    item.onclick = (function (idx) {
+                        return function () { selectItem(idx); };
+                    })(i);
+                    list.appendChild(item);
+                }
+            } else {
+                selectedExeIndex = -1;
+                display.innerHTML = "未找到EXE文件";
+            }
+        }
+
+        function getSelectedExePath() {
+            if (selectedExeIndex >= 0 && selectedExeIndex < exeFiles.length) {
+                return exeFiles[selectedExeIndex].path;
+            }
+            return "";
+        }
+
+        function launchGame(renderingDriver) {
+            initObjects();
+            var targetFile = getSelectedExePath();
+
+            if (targetFile) {
+                var gameCommand = "\"" + targetFile + "\"";
+                if (renderingDriver) {
+                    gameCommand += " --rendering-driver " + renderingDriver;
+                }
+
+                var debugMode = document.getElementById("debugMode").checked;
+
+                if (debugMode) {
+                    var cmdCommand = "cmd.exe /k \"cd /d \"" + currentHTADir + "\" && " + gameCommand + "\"";
+                    shell.Run(cmdCommand, 1);
+                } else {
+                    var cmdCommand = "cmd.exe /c \"cd /d \"" + currentHTADir + "\" && start \"\" " + gameCommand + "\"";
+                    shell.Run(cmdCommand, 0);
+                }
+            } else {
+                alert("未找到可执行文件，请确保本程序所在目录有EXE文件");
+            }
+        }
+
+        function launchNormal() {
+            launchGame("");
+        }
+
+        function launchDX12() {
+            launchGame("d3d12");
+        }
+
+        function launchOpenGL() {
+            launchGame("opengl3");
+        }
+
+        function launchOpenGL3Angle() {
+            launchGame("opengl3_angle");
+        }
+
+        function launchVulkan() {
+            launchGame("vulkan");
+        }
+
+        function clearConfigFile() {
+            initObjects();
+            var appDataPath = shell.ExpandEnvironmentStrings("%APPDATA%");
+            var configFilePath = appDataPath + "\\Godot\\app_userdata\\植物大战僵尸杂交版\\config.res";
+
+            try {
+                if (fso.FileExists(configFilePath)) {
+                    fso.DeleteFile(configFilePath, true);
+                    alert("已清除配置文件！");
+                } else {
+                    alert("找不到配置文件！");
+                }
+            } catch (err) {
+                alert("删除配置文件失败！错误信息：" + err.message);
+            }
+        }
+
+        function openSaveLocation() {
+            initObjects();
+            var appDataPath = shell.ExpandEnvironmentStrings("%APPDATA%");
+            var godotPath = appDataPath + "\\Godot";
+            var savePath = godotPath + "\\app_userdata\\植物大战僵尸杂交版";
+
+            if (fso.FolderExists(savePath)) {
+                shell.Run("explorer.exe \"" + savePath + "\"");
+            } else if (!fso.FolderExists(godotPath)) {
+                alert("存档父文件夹不存在！\n路径：" + godotPath);
+            } else {
+                alert("存档文件夹不存在！\n路径：" + savePath);
+            }
+        }
+
+        document.onclick = function (event) {
+            var container = document.getElementById("customSelect");
+            var list = document.getElementById("customList");
+            var target = event ? event.target : window.event.srcElement;
+
+            var isInside = false;
+            var current = target;
+            while (current) {
+                if (current.id == "customSelect") {
+                    isInside = true;
+                    break;
+                }
+                current = current.parentNode;
+            }
+
+            if (!isInside) {
+                list.style.display = "none";
+            }
+        }
+
+        function getDpiScaling() {
+            try {
+                var shell = new ActiveXObject("WScript.Shell");
+                var appliedDpi = shell.RegRead("HKCU\\Control Panel\\Desktop\\WindowMetrics\\AppliedDPI");
+                return appliedDpi / 96;
+            } catch (e) {
+                return 1;
+            }
+        }
+
+        window.onload = function () {
+            var windowWidth = 600;
+            var windowHeight = 655 + getDpiScaling() * 30;
+            window.resizeTo(windowWidth, windowHeight);
+            window.moveTo(
+                (screen.availWidth - windowWidth) / 2,
+                (screen.availHeight - windowHeight) / 2
+            );
+            initExeDropdown();
+        }
+    </script>
+    <style>
+        body {
+            text-align: center;
+            background-color: #f0f8ff;
+            padding: 20px;
+            margin: 0;
+            font-family: "微软雅黑", "宋体", sans-serif;
+        }
+
+        h2 {
+            font-size: 36px;
+            color: #2c3e50;
+            margin-top: 0;
+            margin-bottom: 20px;
+        }
+
+        .button-table {
+            margin: 0 auto;
+            border-collapse: separate;
+            border-spacing: 15px;
+        }
+
+        button {
+            height: 60px;
+            font-size: 16px;
+            cursor: pointer;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            transition: all 0.2s;
+        }
+
+        .btn-normal {
+            width: 220px;
+        }
+
+        .btn-large {
+            width: 445px;
+        }
+
+        button:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .primary {
+            background-color: #3498db;
+        }
+
+        .primary:hover {
+            background-color: #2980b9;
+        }
+
+        .danger {
+            background-color: #e74c3c;
+        }
+
+        .danger:hover {
+            background-color: #c0392b;
+        }
+
+        .warning {
+            background-color: #f39c12;
+        }
+
+        .warning:hover {
+            background-color: #e67e22;
+        }
+
+        .debug-checkbox {
+            margin: 20px 0;
+            text-align: center;
+            font-size: 16px;
+            color: #2c3e50;
+        }
+
+        .tip-container {
+            margin-top: 0;
+            padding: 15px;
+            background-color: #fff3cd;
+            border: 1px solid #ffeeba;
+            border-radius: 3px;
+            color: #856404;
+            font-size: 14px;
+            line-height: 1.5;
+            width: 480px;
+            margin-left: auto;
+            margin-right: auto;
+            overflow: hidden;
+            zoom: 1;
+        }
+
+        #customSelect {
+            width: 445px;
+            margin: 0 auto 15px;
+            position: relative;
+            z-index: 100;
+            overflow: visible;
+        }
+
+        #customDisplayWrap {
+            width: 443px;
+            height: 40px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            background-color: white;
+            cursor: pointer;
+            overflow: visible;
+            zoom: 1;
+        }
+
+        #customDisplay {
+            width: 383px;
+            height: 40px;
+            line-height: 40px;
+            padding: 0 10px;
+            text-align: left;
+            float: left;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 16px;
+            color: #333;
+        }
+
+        #customArrow {
+            width: 38px;
+            height: 40px;
+            line-height: 40px;
+            float: left;
+            text-align: center;
+            background-color: #f5f5f5;
+            color: #666 !important;
+            border-left: 1px solid #ccc;
+            font-size: 18px;
+            font-family: Arial, "宋体", sans-serif;
+            display: block;
+            zoom: 1;
+        }
+
+        #customList {
+            width: 443px;
+            border: 1px solid #ccc;
+            border-top: none;
+            background-color: white;
+            display: none;
+            max-height: 200px;
+            overflow-y: auto;
+            position: absolute;
+            top: 42px;
+            left: 0;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            z-index: 99;
+        }
+
+        .list-item {
+            padding: 0 15px;
+            height: 40px;
+            line-height: 40px;
+            text-align: left;
+            cursor: pointer;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 16px;
+            color: #333;
+            background-color: white;
+            zoom: 1;
+        }
+
+        .list-item:hover {
+            background-color: #f0f7ff;
+            color: #2980b9;
+        }
+
+        .clearfix {
+            zoom: 1;
+        }
+
+        .clearfix:after {
+            content: ".";
+            display: block;
+            height: 0;
+            clear: both;
+            visibility: hidden;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>杂交重制版启动补丁</h2>
+    <table class="button-table">
+        <tr>
+            <td colspan="2">
+                <div id="customSelect" class="clearfix">
+                    <div id="customDisplayWrap" onclick="toggleDropdown()">
+                        <div id="customDisplay"></div>
+                        <div id="customArrow">▼</div>
+                    </div>
+                    <div id="customList"></div>
+                </div>
+            </td>
+        </tr>
+        <tr>
+            <td colspan="2"><button class="primary btn-large" onclick="launchNormal()">直接启动</button></td>
+        </tr>
+        <tr>
+            <td><button class="primary btn-normal" onclick="launchOpenGL()">以 OpenGL 启动</button></td>
+            <td><button class="primary btn-normal" onclick="launchOpenGL3Angle()">以 OpenGL-Angle 启动</button></td>
+        </tr>
+        <tr>
+            <td><button class="primary btn-normal" onclick="launchVulkan()">以 Vulkan 启动</button></td>
+            <td><button class="primary btn-normal" onclick="launchDX12()">以 DX12 启动</button></td>
+        </tr>
+        <tr>
+            <td><button class="danger btn-normal" onclick="clearConfigFile()">清除配置文件</button></td>
+            <td><button class="warning btn-normal" onclick="openSaveLocation()">打开存档位置</button></td>
+        </tr>
+    </table>
+
+    <div class="debug-checkbox">
+        <input type="checkbox" id="debugMode" name="debugMode" value="1">
+        <label for="debugMode">启动调试模式（显示终端命令行）</label>
+    </div>
+
+    <div class="tip-container">
+        提示：如果你的游戏遇到问题，可以以不同的图形API启动尝试一下
+        <br />
+        1.OpenGL/Angle兼容性更好适合旧设备，DX12和Vulkan帧数更高
+        <br />
+        2.电脑配置低，打开游戏出现报错弹窗或闪退，请尝试以OpenGL/Angle启动
+        <br />
+        3.如果遇到贴图异常的，请尝试以DX12或Vulkan启动
+        <br />
+        4.对于打开时黑屏/白屏后闪退的，请尝试清除配置文件
+    </div>
+
+    <script type="text/javascript">
+        document.getElementById("customDisplayWrap").onclick = toggleDropdown;
+    </script>
+</body>
+
+</html>
